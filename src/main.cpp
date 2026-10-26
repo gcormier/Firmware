@@ -1509,6 +1509,29 @@ void nm420_init(){
 #endif
 }
 
+// Original M5Stack M5Paper (classic ESP32 + IT8951), selected by panel IC
+// OD_PANEL_IC_M5PAPER_960X540 (the panel only ships on this board). The power
+// button only switches the board on while it is held; GPIO2 (main-power hold)
+// must be driven HIGH to keep it on, and GPIO5 enables the external-power rail. GPIO23 (IT8951 power) is driven by
+// FastEPD as the panel's EN pin. Deep-sleep hold and power-off of GPIO2 go
+// through the MOSFET latch (DEVICE_FLAG_BATTERY_LATCH, pwr_pin_2 = 2), so the
+// preset sets both flags.
+void m5paper_init(){
+#if defined(TARGET_ESP32) && defined(CONFIG_IDF_TARGET_ESP32)
+    static constexpr uint8_t kM5PaperOnPins[] = {2, 5};
+    for (uint8_t pin : kM5PaperOnPins) {
+        // Level before direction, then drop the sleep hold: the pad never
+        // glitches LOW on a wake from deep sleep.
+        gpio_set_level((gpio_num_t)pin, 1);
+        gpio_set_direction((gpio_num_t)pin, GPIO_MODE_OUTPUT);
+        gpio_hold_dis((gpio_num_t)pin);
+        pinMode(pin, OUTPUT);
+        digitalWrite(pin, HIGH);
+    }
+    od_log_info("M5Paper init: main-power hold and EXT power HIGH");
+#endif
+}
+
 #ifdef TARGET_ESP32
 void nm420HoldForSleep() {
 #if defined(CONFIG_IDF_TARGET_ESP32S3)

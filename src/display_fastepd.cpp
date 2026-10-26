@@ -82,6 +82,20 @@ void opendisplay_fastepd_load_pins_from_display(const struct DisplayConfig* d, c
                 s_ite_en = fastepd_aux_pin(sys->pwr_pin_3, 21);
             }
             break;
+        case OD_PANEL_IC_M5PAPER_960X540:
+            // M5Paper: IT8951 reset is not wired to the ESP32; GPIO23 gates the
+            // IT8951 supply, so reset_pin doubles as RST/EN/ITE_EN (same as
+            // FastEPD's own BB_PANEL_M5PAPER definition). pwr_pin_2/pwr_pin_3
+            // are the board's power latch here, never panel enables.
+            s_sclk = (d->clk_pin != 0xFF) ? (int8_t)d->clk_pin : 14;
+            s_mosi = (d->data_pin != 0xFF) ? (int8_t)d->data_pin : 12;
+            s_miso = (d->dc_pin != 0xFF) ? (int8_t)d->dc_pin : 13;
+            s_cs = (d->cs_pin != 0xFF) ? (int8_t)d->cs_pin : 15;
+            s_busy = (d->busy_pin != 0xFF) ? (int8_t)d->busy_pin : 27;
+            s_rst = (d->reset_pin != 0xFF) ? (int8_t)d->reset_pin : 23;
+            s_en = s_rst;
+            s_ite_en = s_rst;
+            break;
         default:
             break;
     }
@@ -260,7 +274,14 @@ void fastepd_epaper_begin(void) {
     }
 
     if (!g_epd.currentBuffer()) {
-        rc = g_epd.setPanelSize(BBEP_DISPLAY_ED103TC2);
+        // M5Paper: ED047TC1 960x540, unmirrored. FastEPD 2.2.0 has no
+        // BBEP_DISPLAY_ED047TC1, so size it explicitly. The IT8951 runs its own
+        // waveforms; the gray matrix that setPanelSize(id) would add is unused.
+        if (globalConfig.displays[0].panel_ic_type == OD_PANEL_IC_M5PAPER_960X540) {
+            rc = g_epd.setPanelSize(960, 540, BB_PANEL_FLAG_NONE, -1600);
+        } else {
+            rc = g_epd.setPanelSize(BBEP_DISPLAY_ED103TC2);
+        }
         if (rc != BBEP_SUCCESS || !g_epd.currentBuffer()) {
             s_init_failed = true;
             s_hw_initialized = false;
