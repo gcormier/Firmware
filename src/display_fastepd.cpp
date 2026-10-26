@@ -19,6 +19,9 @@ extern void it8951LoadImgAreaStart(FASTEPDSTATE* pState, uint16_t endian, uint16
 extern void it8951WriteCmdCode(FASTEPDSTATE* pState, uint16_t cmd);
 extern void it8951DisplayArea1Bit(FASTEPDSTATE* pState, uint16_t x, uint16_t y, uint16_t w, uint16_t h,
                                   uint16_t mode, uint8_t bg_gray, uint8_t fg_gray);
+extern void it8951DisplayArea(FASTEPDSTATE* pState, uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t mode);
+extern uint16_t it8951ReadReg(FASTEPDSTATE* pState, uint16_t addr);
+extern void it8951WriteReg(FASTEPDSTATE* pState, uint16_t addr, uint16_t val);
 // FastEPD's cached PCAL6416A write
 extern void bbepPCALDigitalWrite(uint8_t pin, uint8_t value);
 static void fastepd_inkplate_wakeup_off(void);
@@ -192,8 +195,9 @@ static bool it8951_fullscreen_du(void) {
     it8951WaitForLUTReady(st);
     it8951SetImgBufBaseAddr(st);
 
-    const uint16_t endian = mirror_x ? IT8951_LDIMG_B_ENDIAN : IT8951_LDIMG_L_ENDIAN;
-    it8951LoadImgAreaStart(st, endian, IT8951_8BPP, IT8951_ROTATE_0, 0, 0, pitch, h);
+    // B_ENDIAN either way: L_ENDIAN swaps the bytes of each 16-bit word (see
+    // it8951_full_write_unmirrored()).
+    it8951LoadImgAreaStart(st, IT8951_LDIMG_B_ENDIAN, IT8951_8BPP, IT8951_ROTATE_0, 0, 0, pitch, h);
 
     uint8_t* rowbuf = mirror_x ? (uint8_t*)malloc(pitch) : nullptr;
     if (mirror_x && !rowbuf) return false;
@@ -298,9 +302,62 @@ void fastepd_epaper_begin(void) {
     s_hw_initialized = true;
 }
 
+// FastEPD 2.2.0 loads an unmirrored IT8951 frame as L_ENDIAN, which swaps the
+// two bytes of every 16-bit word: 4bpp pixel pairs land 2 px off, 1bpp bytes
+// 8 px off (verified on an M5Paper). Same frame and GC16 waveform as
+// it8951WriteFramebuffer4Bit/1Bit, loaded B_ENDIAN as M5EPD does. Mirrored
+// panels (ED103TC2) already get B_ENDIAN from FastEPD.
+static void it8951_full_write_unmirrored(void) {
+    FASTEPDSTATE* st = g_epd.state();
+    const uint8_t* s = g_epd.currentBuffer();
+    if (!st || !s) return;
+    const bool gray = (g_epd.getMode() == BB_MODE_4BPP);
+    const uint16_t w = (uint16_t)st->native_width;
+    const uint16_t h = (uint16_t)st->native_height;
+    const unsigned pitch = gray ? (unsigned)((w + 1) / 2) : (unsigned)((w + 7) / 8);
+
+    g_epd.einkPower(1);
+    it8951WaitForLUTReady(st);
+    it8951SetImgBufBaseAddr(st);
+    if (gray) {
+        // Leave 1bpp mode (it8951DisplayArea1Bit() sets it).
+        it8951WriteReg(st, IT8951_REG_UP1SR + 2, it8951ReadReg(st, IT8951_REG_UP1SR + 2) & ~(1 << 2));
+        it8951LoadImgAreaStart(st, IT8951_LDIMG_B_ENDIAN, IT8951_4BPP, IT8951_ROTATE_0, 0, 0, w, h);
+    } else {
+        it8951LoadImgAreaStart(st, IT8951_LDIMG_B_ENDIAN, IT8951_8BPP, IT8951_ROTATE_0, 0, 0, pitch, h);
+    }
+
+    gpio_set_level((gpio_num_t)st->u8CS, LOW);
+    SPI.beginTransaction(SPISettings(st->spi_frequency, MSBFIRST, SPI_MODE0));
+    it8951WaitForReady(st);
+    SPI.transfer16(0x0000);
+    it8951WaitForReady(st);
+    for (uint16_t row = 0; row < h; row++) {
+        SPI.writeBytes(s, pitch);
+        s += pitch;
+        if ((row & 7) == 0) yield();
+    }
+    SPI.endTransaction();
+    gpio_set_level((gpio_num_t)st->u8CS, HIGH);
+
+    it8951WriteCmdCode(st, IT8951_TCON_LD_IMG_END);
+    if (gray) {
+        it8951DisplayArea(st, 0, 0, w, h, IT8951_MODE_2);
+    } else {
+        it8951DisplayArea1Bit(st, 0, 0, w, h, IT8951_MODE_2, 0x00, 0xff);
+    }
+    it8951WaitForReady(st);
+    g_epd.einkPower(0);
+}
+
 // REFRESH_FULL: parallel panels flash-clear to flush ghosting; IT8951 clears
 // internally (ignores the mode) so it stays CLEAR_NONE.
 static void fastepd_full_refresh_impl(void) {
+    FASTEPDSTATE* st = g_epd.state();
+    if (!fastepd_is_parallel() && !(st->iFlags & BB_PANEL_FLAG_MIRROR_X)) {
+        it8951_full_write_unmirrored();
+        return;
+    }
     int clear = CLEAR_NONE;
     if (fastepd_is_parallel()) {
         // The PaperS3 needs the library-default 10-pass clear: CLEAR_FAST's
