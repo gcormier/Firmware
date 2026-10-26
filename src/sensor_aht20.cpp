@@ -8,6 +8,7 @@
 #include <Wire.h>
 
 extern struct GlobalConfig globalConfig;
+bool nm420InitEnabled();
 
 static uint8_t aht20Crc(const uint8_t* data, uint8_t length) {
     uint8_t crc = 0xFF;
@@ -66,7 +67,7 @@ void pollAht20SensorsForMsd(void) {
         if (start > 8) return;
 
 #if defined(TARGET_ESP32) && defined(CONFIG_IDF_TARGET_ESP32S3)
-        const bool gated = (globalConfig.system_config.device_flags & OD_DEVICE_FLAG_NM420_INIT) != 0;
+        const bool gated = nm420InitEnabled();
         if (gated) {
             digitalWrite(40, HIGH);
             delay(100);

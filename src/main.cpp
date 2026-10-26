@@ -1496,6 +1496,19 @@ void ws_pp_init(){
 // it HIGH only during a measurement, then LOW again while the CPU is awake.
 // The configured pins (panel 1/2/4/5/6/46, I2C 38/39, USER key 45) are driven by
 // their own init blocks and must not be touched here.
+// Bit 6 is the flag. Configs written before the move used bit 5, which the
+// shared spec assigns to nRF54 Channel Sounding; no Firmware target supports
+// that, so on ESP32-S3 (the only NM-EPD-420 MCU) bit 5 still selects the init.
+bool nm420InitEnabled(){
+    const uint8_t flags = globalConfig.system_config.device_flags;
+    if (flags & DEVICE_FLAG_NM420_INIT) return true;
+#if defined(TARGET_ESP32) && defined(CONFIG_IDF_TARGET_ESP32S3)
+    return (flags & DEVICE_FLAG_NM420_INIT_LEGACY) != 0;
+#else
+    return false;
+#endif
+}
+
 void nm420_init(){
 #if defined(TARGET_ESP32) && defined(CONFIG_IDF_TARGET_ESP32S3)
     for (uint8_t pin : kNm420OffPins) {
@@ -1512,7 +1525,7 @@ void nm420_init(){
 #ifdef TARGET_ESP32
 void nm420HoldForSleep() {
 #if defined(CONFIG_IDF_TARGET_ESP32S3)
-    if (!globalConfig.loaded || !(globalConfig.system_config.device_flags & DEVICE_FLAG_NM420_INIT)) return;
+    if (!globalConfig.loaded || !nm420InitEnabled()) return;
     for (uint8_t pin : kNm420OffPins) {
         digitalWrite(pin, LOW);
         gpio_hold_en((gpio_num_t)pin);

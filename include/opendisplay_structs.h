@@ -21,7 +21,7 @@
  *
  *   OD_STRUCTS_VERSION  2.1   (MAJOR.MINOR spec marker for THIS file; see
  *                              VERSIONING POLICY below -- NOT sent on the wire)
- *   LAST CHANGED        2026-08-30
+ *   LAST CHANGED        2026-10-27
  *
  *   The two version schemes carried here are DISTINCT (see §6 Q2 of the plan):
  *     - OD_STRUCTS_VERSION_* : documents this spec file, like protocol.h's
@@ -88,6 +88,11 @@
  *     - SensorType 6 is nPM1300 (already used by another OpenDisplay firmware
  *       family); SensorType 7 is AHT20, publishing the same 3-byte
  *       temperature/humidity MSD value as SHT40. GPIO40 gates its supply.
+ *     - DeviceFlags bit5 is OD_DEVICE_FLAG_CHANNEL_SOUNDING (nRF54 firmware
+ *       family; assigned in config.yaml since 2026-08). The NM420_INIT entry
+ *       above wrongly took bit5 as well; it moves to bit6. Firmware keeps
+ *       honouring a bit5 NM420 config on ESP32-S3 (no Channel Sounding there)
+ *       for boards provisioned before the move. Group comment: bit 7 reserved.
  *     - Add each payload-layout change here as it lands. On the next version bump,
  *       move these under a new "MAJOR.MINOR (YYYY-MM-DD)" heading.
  *
@@ -437,13 +442,14 @@ enum ManufacturerId {
 #define OD_COMM_MODE_OEPL              (1u << 1) /* @doc "OEPL (OpenEPaperLink) transfer supported" */
 #define OD_COMM_MODE_WIFI              (1u << 2) /* @doc "WiFi transfer supported" */
 
-/* SystemConfig.device_flags @bits DeviceFlags (bits 6-7 reserved). */
+/* SystemConfig.device_flags @bits DeviceFlags (bit 7 reserved). */
 #define OD_DEVICE_FLAG_PWR_PIN         (1u << 0) /* @doc "device has external power management for the display etc." */
 #define OD_DEVICE_FLAG_XIAO_INIT       (1u << 1) /* @doc "apply Seeed XIAO low-power init" */
 #define OD_DEVICE_FLAG_WS_PP_INIT      (1u << 2) /* @doc "apply Waveshare PhotoPainter low-power init" */
 #define OD_DEVICE_FLAG_PWR_LATCH       (1u << 3) /* @doc "self-holding MOSFET latch on pwr_pin_2; optional long-press shutdown button on pwr_pin_3" */
 #define OD_DEVICE_FLAG_PWR_LATCH_DFF   (1u << 4) /* @doc "74AHC1G79 D-FF latch: pwr_pin_2=D (hold), pwr_pin_3=CP (clock); command 0x0052 releases latch" */
-#define OD_DEVICE_FLAG_NM420_INIT      (1u << 5) /* @doc "apply RockBase NM-EPD-420 low-power init: default peripheral and ADC enable pins LOW; hold them LOW in deep sleep" */
+#define OD_DEVICE_FLAG_CHANNEL_SOUNDING (1u << 5) /* @doc "BLE Channel Sounding (RAS reflector) enabled when the firmware supports it (nRF54 firmware family)" */
+#define OD_DEVICE_FLAG_NM420_INIT      (1u << 6) /* @doc "apply RockBase NM-EPD-420 low-power init: default peripheral and ADC enable pins LOW; hold them LOW in deep sleep" */
 
 /** @struct SystemConfig  @packet 0x01  @required
  *  @doc "Host IC identity, communication capabilities, and power-management pins.
