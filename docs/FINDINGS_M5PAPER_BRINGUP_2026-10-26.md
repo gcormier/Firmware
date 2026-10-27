@@ -28,7 +28,7 @@ serial at INFO level, so they were read from the advertisements or from a
 | Orientation | PASS (landscape, not mirrored) |
 | Contrast at FastEPD's fixed VCOM −1.5 V | Acceptable to the eye; −2.30 V patch kept unapplied (§2) |
 | Repeated pushes | PASS (several full pushes, no wedge, no WDT) |
-| Mono (color_scheme 0), DU fast path | Load verified by IT8951 memory readback (§1). Not checked on screen |
+| Mono (color_scheme 0), DU fast path | **FAIL → fixed** (1bpp bit order, §1). Full clean; DU readable with normal DU ghosting |
 | FAST refresh in 4bpp mode | **FAIL → fixed** (gray data sent as 1bpp DU, §1) |
 | Touch (GT911) | PASS with flags **0x06**. Fixed GPIO36 errors (§3) |
 | Buttons 37/38/39 | PASS (press and release on all three) |
@@ -74,8 +74,20 @@ every 27th row, not committed) confirms the frame lands as sent:
 | Full, 1bpp (mono config) | 2400/2400 (1232 with the old byte swap) |
 | DU, 1bpp (mono config, FAST upload) | 2400/2400 |
 
-**Not verified:** the 1bpp bit order on screen (the readback only proves the
-bytes arrive unswapped). Worth reporting upstream to FastEPD.
+Worth reporting upstream to FastEPD.
+
+**1bpp bit order (fixed, `34548b0`, PR 1):** with the bytes loading correctly,
+a full mono refresh was still unreadable ("vertical interlacing"). A test image
+with four bands, each pre-scrambled on the host (none, bits reversed within
+each byte, bytes swapped, both), showed only the bit-reversed band cleanly:
+the IT8951 1bpp mode takes the leftmost pixel from bit 0, while FastEPD packs
+it in bit 7. Mirrored panels never showed it, because FastEPD reverses the
+byte order of each row for them, and that plus LSB-first mirrors the whole row.
+Unmirrored panels now send each 1bpp byte bit-reversed (full writes and DU).
+After the fix a full refresh of a text, ruler and 1 px line test image is
+clean (user confirmed). A FAST (DU) refresh is readable but shows faint ghosts
+of the previous image and some white specks in large black areas, which is
+normal for the DU waveform.
 
 **FAST refresh in 4bpp mode (fixed, `27016a4`, PR 1):** the readback also
 showed that a FAST upload with the GRAY16 config sent the 4bpp framebuffer
@@ -227,13 +239,16 @@ may add error.
 | `4d6e092` | opendisplay.org `-rtc` | merge of the above |
 | `27016a4` | Firmware `greg/awesome-dijkstra-5pq3ha` | IT8951 FAST refresh in 4bpp falls back to full |
 | `2d9a8f8` | Firmware `-rtc` | merge of the above |
-| (this commit) | Firmware `-rtc` | readback, alarm-fire and battery results in this report |
+| `d672a6b` | Firmware `-rtc` | readback, alarm-fire and battery results in this report |
+| `34548b0` | Firmware `greg/awesome-dijkstra-5pq3ha` | bit-reverse 1bpp rows for unmirrored IT8951 panels |
+| `314e411` | Firmware `-rtc` | merge of the above |
+| (this commit) | Firmware `-rtc` | 1bpp bit-order result in this report |
 
 No changes to the RTC driver itself were needed.
 
 ## Open items
 
-- Mono (color_scheme 0) and the DU fast path on screen (bit order).
+- DU fast-refresh quality (ghosting, fill); a different fast waveform may do better.
 - Battery voltage against a multimeter, and at lower charge.
 - Off-current measurement.
 - Power-button hold time.
