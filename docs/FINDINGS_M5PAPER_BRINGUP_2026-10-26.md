@@ -201,7 +201,11 @@ how the wake is detected.
 - **`CMD_POWER_OFF` (0x0052)** used to NACK on the MOSFET latch. It now
   drives GPIO2 low via `powerLatchTriggerOff()` (on -rtc). On USB the board
   went silent on serial and BLE for 60 s and the reset button brought it
-  back. Not verified on battery. The vendored protocol header still says
+  back. **On battery: PASS.** Sent at 17:47:07, advertising stopped by 17:47:16
+and stayed off for 20 min (one RSSI −127 cached report from the Windows
+scanner at 17:48, not a real power-on), so no phantom power-on. A 2 s rocker
+push brought it back (advertising and answering at 4.13 V). The ACK was not
+received (fire-and-forget). The vendored protocol header still says
   "D-FF only" and needs an upstream update; no wire bytes change.
 - **Deep-sleep button wake:** a classic ESP32 has ext0 only, so just GPIO37
   (rocker up) is armed. The log warns `pin 37 has no internal pull`. 38 and 39
@@ -255,7 +259,6 @@ No changes to the RTC driver itself were needed.
 - Watching the screen during battery RTC wakes for a boot-screen redraw.
 - The 16000 s alarm wake on battery (the fire is verified on USB).
 - FAST refresh in 4bpp on the ED103TC2 (reTerminal).
-- 0x0052 power-off on battery, and no phantom power-on after it.
 - Follow-ups: update the 0x0052 `@targets`/`@errors` text in
   opendisplay-protocol (MOSFET latch now supported); upstream FastEPD endian
   bug report.
