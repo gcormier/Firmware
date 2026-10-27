@@ -33,7 +33,7 @@ serial at INFO level, so they were read from the advertisements or from a
 | Touch (GT911) | PASS with flags **0x06**. Fixed GPIO36 errors (§3) |
 | Buttons 37/38/39 | PASS (press and release on all three) |
 | Battery hold (GPIO2) after unplugging USB | PASS (19 min on battery, still advertising) |
-| Power-button hold time | **Not measured** (§6) |
+| Power-button hold time | About **1.1 s** minimum; hold 2–3 s (§6) |
 | Battery voltage factor | **0xAE** (2:1 divider, measured at full charge, §7) |
 | RTC sleep on USB (fallback path) | PASS |
 | RTC power-off on battery, 120 s | PASS: 20 arms, 19 wakes + 1 pending, 0 missed (§4) |
@@ -191,11 +191,18 @@ how the wake is detected.
 
 ## 6. Power-on, power-off and buttons
 
-- **Power button = rocker pushed in** (KEY_PUSH, GPIO38). M5Stack documents a
-  2 s hold. `m5paper_init()` drives GPIO2 at about 0.17 s after boot (about
-  0.3–0.5 s after power-on, counting the ROM and bootloader). The hold time was
-  not measured, because tests were confused by the leftover RTC timer and by
-  reset presses that didn't register.
+- **Power button = rocker pushed in** (KEY_PUSH, GPIO38). The rocker only
+  powers the rail while it is held; the board stays on once `m5paper_init()`
+  drives GPIO2. Timed on the PC over serial (USB, EN reset, 3 runs): first app
+  log line at 1058 ms, `M5Paper init` at 1073 ms, so **about 1.1 s minimum
+  hold**. Roughly 0.9 s of that is before the app starts: the prebuilt
+  bootloader validates the whole app image on every power-on
+  (`BOOTLOADER_SKIP_VALIDATE_ON_POWER_ON` off) and PSRAM is set up. On battery,
+  after 0x0052: 0.3 s and 1 s holds did not power on, a hand-timed 2 s hold
+  did once and not once, and 5 s worked every time, including 15 s after a
+  power-off (so it is hold time, not leftover charge in the rail). M5Stack's
+  "hold 2 s" advice fits; 3 s is reliable. Driving GPIO2 from an earlier hook
+  (a global constructor) might save the app-side part; not tried.
 - **Reset button (back)** cuts power on battery (GPIO2 released), unless an
   RTC interrupt is holding `PWR_EN`.
 - **`CMD_POWER_OFF` (0x0052)** used to NACK on the MOSFET latch. It now
@@ -255,7 +262,6 @@ No changes to the RTC driver itself were needed.
 - DU fast-refresh quality (ghosting, fill); a different fast waveform may do better.
 - Battery voltage against a multimeter, and at lower charge.
 - Off-current measurement.
-- Power-button hold time.
 - Watching the screen during battery RTC wakes for a boot-screen redraw.
 - The 16000 s alarm wake on battery (the fire is verified on USB).
 - FAST refresh in 4bpp on the ED103TC2 (reTerminal).
