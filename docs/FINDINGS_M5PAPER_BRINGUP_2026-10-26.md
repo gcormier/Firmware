@@ -126,9 +126,12 @@ It fires up to 59 s early because the alarm ignores seconds.
 config (no sensor type 8), the board switched itself back on about 60–75 s
 after every reset-button power-off. A repeating RTC timer left armed by the
 factory firmware survives a flash erase, because the RTC is on VBAT_IN. The
-RTC config clears it at every boot. *Suggestion:* clear the PCF8563 interrupt
-flags and enables in `m5paper_init()` whatever the sensor config, so the
-USB-only preset doesn't get phantom power-ons.
+RTC config clears it at every boot. **Fixed (`0b7bf40`, PR 1):**
+`m5paper_init()` now clears the RTC interrupts, timer and alarm on every
+boot. On -rtc it skips that when RTC power-off is configured, because
+`rtcConsumeWake()` does the clear itself and needs the flags. Verified with a
+temporary readback: armed `C2=01 TC=82` before, `C2=00 TC=03` after. Not
+verified: that the phantom power-on is gone after a battery power-off.
 
 **VL flag:** the seconds register has VL (bit 7) set, meaning the RTC lost
 power at some point (probably long ago). The firmware doesn't use wall-clock
@@ -152,9 +155,11 @@ how the wake is detected.
   reset presses that didn't register.
 - **Reset button (back)** cuts power on battery (GPIO2 released), unless an
   RTC interrupt is holding `PWR_EN`.
-- **`CMD_POWER_OFF` (0x0052)** NACKs on the MOSFET latch: only the D-FF latch
-  is implemented. The M5Paper could support it by driving GPIO2 low.
-  Follow-up.
+- **`CMD_POWER_OFF` (0x0052)** used to NACK on the MOSFET latch. It now
+  drives GPIO2 low via `powerLatchTriggerOff()` (on -rtc). On USB the board
+  went silent on serial and BLE for 60 s and the reset button brought it
+  back. Not verified on battery. The vendored protocol header still says
+  "D-FF only" and needs an upstream update; no wire bytes change.
 - **Deep-sleep button wake:** a classic ESP32 has ext0 only, so just GPIO37
   (rocker up) is armed. The log warns `pin 37 has no internal pull`. 38 and 39
   are timer-only. On battery with RTC power-off the ESP32 has no power at all,
@@ -179,8 +184,10 @@ schematic revision. Calibrate with a multimeter: new = 0xA1 × actual / reported
 | `207ac66` | Firmware `-rtc` | merge of the above |
 | `a075d2c` | opendisplay.org `greg/awesome-dijkstra-5pq3ha` | `m5-paper` touch flags 0x6 |
 | `05de81b` | opendisplay.org `-rtc` | merge of the above |
+| `0b7bf40` | Firmware `greg/awesome-dijkstra-5pq3ha` | `m5paper_init()` clears the RTC interrupts, timer and alarm |
+| (this commit) | Firmware `-rtc` | merge of the above; 0x0052 on the MOSFET latch; skip the board-init RTC clear when RTC power-off is configured |
 
-No changes to the RTC code were needed.
+No changes to the RTC driver itself were needed.
 
 ## Open items
 
@@ -190,5 +197,7 @@ No changes to the RTC code were needed.
 - Power-button hold time.
 - Watching the screen during battery RTC wakes for a boot-screen redraw.
 - The actual 16000 s alarm fire.
-- Follow-ups: 0x0052 on the MOSFET latch; clearing the RTC in `m5paper_init()`;
-  upstream FastEPD endian bug report.
+- 0x0052 power-off on battery, and no phantom power-on after it.
+- Follow-ups: update the 0x0052 `@targets`/`@errors` text in
+  opendisplay-protocol (MOSFET latch now supported); upstream FastEPD endian
+  bug report.

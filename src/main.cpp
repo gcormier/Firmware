@@ -1587,7 +1587,9 @@ void m5paper_init(){
         digitalWrite(pin, HIGH);
     }
     od_log_info("M5Paper init: main-power hold and EXT power HIGH");
-    m5paperRtcQuiesce();
+    // With RTC power-off configured, rtcConsumeWake() clears it later in
+    // setup() and needs the flags to recognise an RTC wake.
+    if (!rtcWakeConfigured()) m5paperRtcQuiesce();
 #endif
 }
 
