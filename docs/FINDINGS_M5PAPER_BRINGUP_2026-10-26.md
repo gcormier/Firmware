@@ -28,16 +28,17 @@ serial at INFO level, so they were read from the advertisements or from a
 | Orientation | PASS (landscape, not mirrored) |
 | Contrast at FastEPD's fixed VCOM −1.5 V | Acceptable to the eye; −2.30 V patch kept unapplied (§2) |
 | Repeated pushes | PASS (several full pushes, no wedge, no WDT) |
-| Mono (color_scheme 0), DU fast path | **Not verified on hardware** |
+| Mono (color_scheme 0), DU fast path | Load verified by IT8951 memory readback (§1). Not checked on screen |
+| FAST refresh in 4bpp mode | **FAIL → fixed** (gray data sent as 1bpp DU, §1) |
 | Touch (GT911) | PASS with flags **0x06**. Fixed GPIO36 errors (§3) |
 | Buttons 37/38/39 | PASS (press and release on all three) |
 | Battery hold (GPIO2) after unplugging USB | PASS (19 min on battery, still advertising) |
 | Power-button hold time | **Not measured** (§6) |
-| Battery voltage factor | **Not calibrated** (no multimeter). 0xA1 reads 3.91 V while charging, which is plausible |
+| Battery voltage factor | **0xAE** (2:1 divider, measured at full charge, §7) |
 | RTC sleep on USB (fallback path) | PASS |
 | RTC power-off on battery, 120 s | PASS: 20 arms, 19 wakes + 1 pending, 0 missed (§4) |
 | 600 s (1/60 Hz countdown) | PASS on USB: RTC timer fired (TF set) before the ESP32 timer |
-| 16000 s (minute/hour alarm) | Programming verified by register readback. The fire itself was not waited out (§4) |
+| 16000 s (minute/hour alarm) | PASS on USB: alarm flag set at the expected minute (§4) |
 | Image push in a wake window | see §5 |
 | Off current | **Not measured** |
 | Boot screen not redrawn on battery RTC wakes | **Not observed visually.** The firmware path (`is_deep_sleep_wake`) is confirmed on USB |
@@ -64,8 +65,27 @@ waveform, loaded B_ENDIAN. `it8951_fullscreen_du()` uses B_ENDIAN too.
 Mirrored panels keep FastEPD's own writer, unchanged.
 
 **Verified:** the 4bpp image is sharp after the fix (user confirmed).
-**Not verified:** 1bpp/mono and the DU path on screen. Worth reporting
-upstream to FastEPD.
+A temporary readback of IT8951 memory after each load (MEM_BST_RD, sampled
+every 27th row, not committed) confirms the frame lands as sent:
+
+| Path | Sampled bytes matching the framebuffer |
+|---|---|
+| Full, 4bpp (GC16) | 19200/19200 |
+| Full, 1bpp (mono config) | 2400/2400 (1232 with the old byte swap) |
+| DU, 1bpp (mono config, FAST upload) | 2400/2400 |
+
+**Not verified:** the 1bpp bit order on screen (the readback only proves the
+bytes arrive unswapped). Worth reporting upstream to FastEPD.
+
+**FAST refresh in 4bpp mode (fixed, `27016a4`, PR 1):** the readback also
+showed that a FAST upload with the GRAY16 config sent the 4bpp framebuffer
+through `it8951_fullscreen_du()`, which loads w/8 bytes per row as 1bpp. Every
+sampled byte in IT8951 memory equalled the raw 4bpp bytes, so the top quarter
+of the gray image would show as 1bpp noise. The parallel path already fell
+back to a full refresh for 4bpp. The IT8951 path now does too, for direct
+and partial transfers. After the fix the same upload logs `EPD refresh: FAST`
+and loads through the 4bpp full path (19200/19200). The ED103TC2 (reTerminal)
+takes the same branch but was not tested.
 
 ## 2. VCOM
 
@@ -122,6 +142,17 @@ from 10, TF set, TIE on.
 18:00. Readback `AL=00 18 80 80`, `C2=02` (AIE), `TC=03` (timer off). Correct.
 It fires up to 59 s early because the alarm ignores seconds.
 
+**16000 s fire (USB, second run):** armed at RTC 04:11:40 with `AL=38 08 80 80`
+(08:38). For the test only, the ESP32 backstop timer was extended by 600 s so
+the RTC would act first. At the next boot (RTC 08:42:38) the dump showed
+`C2=0A`: **AF set**, AIE on, so the alarm matched. The ESP32 itself woke on its
+timer (`Wake-up reason: timer`): on USB the RTC INT only pulls `PWR_EN`, and the
+rail is already up, so nothing wakes the chip. That is expected. On battery the
+same INT switches the rail on. The ESP32 timer (16600 s nominal) expired after
+about 16260 s of RTC time, so the ESP32 slow clock ran about 2% fast. The wake
+cycle after that re-armed the 120 s countdown and fired normally (`C2=05`, TF).
+Not verified: the 16000 s wake on battery.
+
 **Leftover RTC state from M5Stack's factory firmware:** with the USB-only
 config (no sensor type 8), the board switched itself back on about 60–75 s
 after every reset-button power-off. A repeating RTC timer left armed by the
@@ -172,9 +203,14 @@ how the wake is detected.
 ## 7. Battery voltage
 
 The schematic shows R83 3 kΩ / R86 11 kΩ (VBAT_S = 0.79 × VBAT). M5EPD
-assumes 2:1 (`SCALE_INV 2`). With factor 0xA1 the firmware reports 3.91 V
-while charging, which fits roughly 2:1, so this board may not match that
-schematic revision. Calibrate with a multimeter: new = 0xA1 × actual / reported.
+assumes 2:1 (`SCALE_INV 2`). After a night on USB (battery full, about 4.20 V),
+GPIO35 read raw 2416 and the eFuse-calibrated `analogReadMilliVolts()` read
+2101 mV, which is exactly 2:1. So this board does not match that schematic
+revision. The firmware computes V = raw × factor / 100000, so 4.20 V needs
+factor 174 = **0xAE**. The `m5-paper` preset is updated on both opendisplay.org
+branches (`5479e3f`, merged as `4d6e092`). The board now reports 4.20 V. Not
+checked against a multimeter, or at a lower charge, where ADC non-linearity
+may add error.
 
 ## Changes
 
@@ -185,18 +221,25 @@ schematic revision. Calibrate with a multimeter: new = 0xA1 × actual / reported
 | `a075d2c` | opendisplay.org `greg/awesome-dijkstra-5pq3ha` | `m5-paper` touch flags 0x6 |
 | `05de81b` | opendisplay.org `-rtc` | merge of the above |
 | `0b7bf40` | Firmware `greg/awesome-dijkstra-5pq3ha` | `m5paper_init()` clears the RTC interrupts, timer and alarm |
-| (this commit) | Firmware `-rtc` | merge of the above; 0x0052 on the MOSFET latch; skip the board-init RTC clear when RTC power-off is configured |
+| `d0072af` | Firmware `-rtc` | merge of the above; 0x0052 on the MOSFET latch; skip the board-init RTC clear when RTC power-off is configured |
+
+| `5479e3f` | opendisplay.org `greg/awesome-dijkstra-5pq3ha` | `m5-paper` voltage_scaling_factor 0xAE |
+| `4d6e092` | opendisplay.org `-rtc` | merge of the above |
+| `27016a4` | Firmware `greg/awesome-dijkstra-5pq3ha` | IT8951 FAST refresh in 4bpp falls back to full |
+| `2d9a8f8` | Firmware `-rtc` | merge of the above |
+| (this commit) | Firmware `-rtc` | readback, alarm-fire and battery results in this report |
 
 No changes to the RTC driver itself were needed.
 
 ## Open items
 
-- Mono (color_scheme 0) and the DU fast path on screen.
-- Battery voltage calibration (multimeter).
+- Mono (color_scheme 0) and the DU fast path on screen (bit order).
+- Battery voltage against a multimeter, and at lower charge.
 - Off-current measurement.
 - Power-button hold time.
 - Watching the screen during battery RTC wakes for a boot-screen redraw.
-- The actual 16000 s alarm fire.
+- The 16000 s alarm wake on battery (the fire is verified on USB).
+- FAST refresh in 4bpp on the ED103TC2 (reTerminal).
 - 0x0052 power-off on battery, and no phantom power-on after it.
 - Follow-ups: update the 0x0052 `@targets`/`@errors` text in
   opendisplay-protocol (MOSFET latch now supported); upstream FastEPD endian
