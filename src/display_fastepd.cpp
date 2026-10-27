@@ -179,6 +179,26 @@ static void blit_1bpp_rect(uint8_t* dst, const uint8_t* src, uint32_t src_len,
     *io_offset = off;
 }
 
+// The IT8951 1bpp mode takes the leftmost pixel from bit 0; FastEPD packs it
+// in bit 7. Mirrored panels get away with reversing the byte order of each
+// row (that, plus LSB-first, mirrors the whole row). Unmirrored panels need
+// each byte bit-reversed (verified on an M5Paper).
+static void it8951_write_1bpp_row_lsb_first(const uint8_t* src, unsigned n) {
+    uint8_t chunk[64];
+    while (n) {
+        const unsigned k = n < sizeof(chunk) ? n : (unsigned)sizeof(chunk);
+        for (unsigned i = 0; i < k; i++) {
+            uint8_t b = src[i];
+            b = (uint8_t)((b >> 4) | (b << 4));
+            b = (uint8_t)(((b & 0xCC) >> 2) | ((b & 0x33) << 2));
+            chunk[i] = (uint8_t)(((b & 0xAA) >> 1) | ((b & 0x55) << 1));
+        }
+        SPI.writeBytes(chunk, k);
+        src += k;
+        n -= k;
+    }
+}
+
 /** Full-screen 1bpp DU (mode 1) — non-flashing. Matches FastEPD full-frame
  *  packing (MIRROR_X → B_ENDIAN + byte-reverse) with IT8951 DU waveform. */
 static bool it8951_fullscreen_du(void) {
@@ -216,7 +236,7 @@ static bool it8951_fullscreen_du(void) {
             }
             SPI.writeBytes(rowbuf, pitch);
         } else {
-            SPI.writeBytes(src, pitch);
+            it8951_write_1bpp_row_lsb_first(src, pitch);
         }
         if ((row & 7) == 0) yield();
     }
@@ -305,8 +325,9 @@ void fastepd_epaper_begin(void) {
 // FastEPD 2.2.0 loads an unmirrored IT8951 frame as L_ENDIAN, which swaps the
 // two bytes of every 16-bit word: 4bpp pixel pairs land 2 px off, 1bpp bytes
 // 8 px off (verified on an M5Paper). Same frame and GC16 waveform as
-// it8951WriteFramebuffer4Bit/1Bit, loaded B_ENDIAN as M5EPD does. Mirrored
-// panels (ED103TC2) already get B_ENDIAN from FastEPD.
+// it8951WriteFramebuffer4Bit/1Bit, loaded B_ENDIAN as M5EPD does; 1bpp rows
+// are also bit-reversed (it8951_write_1bpp_row_lsb_first()). Mirrored panels
+// (ED103TC2) already get B_ENDIAN from FastEPD.
 static void it8951_full_write_unmirrored(void) {
     FASTEPDSTATE* st = g_epd.state();
     const uint8_t* s = g_epd.currentBuffer();
@@ -333,7 +354,8 @@ static void it8951_full_write_unmirrored(void) {
     SPI.transfer16(0x0000);
     it8951WaitForReady(st);
     for (uint16_t row = 0; row < h; row++) {
-        SPI.writeBytes(s, pitch);
+        if (gray) SPI.writeBytes(s, pitch);
+        else it8951_write_1bpp_row_lsb_first(s, pitch);
         s += pitch;
         if ((row & 7) == 0) yield();
     }
