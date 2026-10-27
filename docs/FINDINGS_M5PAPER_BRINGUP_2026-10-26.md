@@ -1,0 +1,194 @@
+# M5Paper (original, ESP32) hardware bring-up — 2026-10-26
+
+Hardware validation of the two M5Paper branches on a real device:
+
+- `greg/awesome-dijkstra-5pq3ha` (PR 1): panel IC 3005 on the FastEPD IT8951
+  path, `m5paper_init()`.
+- `greg/awesome-dijkstra-5pq3ha-rtc` (PR 2, stacked): RTC power-off sleep,
+  sensor type 8 (PCF8563/BM8563) and the MOSFET latch.
+
+**Device:** original M5Stack M5Paper. ESP32-D0WDQ6-V3, MAC 3c:61:05:09:20:54,
+16 MB flash, **CP2104** USB-UART (not CH9102, so it needs the Silicon Labs
+CP210x driver). The panel is rigid, which suggests v1.0, but this is not
+confirmed. Built as `esp32-wrover-e-N4R8`, pioarduino 55.03.39, flashed from
+Windows 11 on COM16. The original 16 MB flash was backed up before erasing.
+
+**Host-side tooling:** serial logging opened with DTR/RTS deasserted, because
+opening the CP2104 normally resets the ESP32. BLE uploads used `py-opendisplay`
+7.14.1. Touch and button events are only published in the BLE MSD, not on
+serial at INFO level, so they were read from the advertisements or from a
+`-DOD_LOG_LEVEL=OD_LOG_DEBUG` build.
+
+## Summary
+
+| Area | Result |
+|---|---|
+| Boot, `m5paper_init()`, FastEPD init | PASS |
+| 4bpp gray image | **FAIL → fixed** (byte-swapped IT8951 load, see §1) |
+| Orientation | PASS (landscape, not mirrored) |
+| Contrast at FastEPD's fixed VCOM −1.5 V | Acceptable to the eye; −2.30 V patch kept unapplied (§2) |
+| Repeated pushes | PASS (several full pushes, no wedge, no WDT) |
+| Mono (color_scheme 0), DU fast path | **Not verified on hardware** |
+| Touch (GT911) | PASS with flags **0x06**. Fixed GPIO36 errors (§3) |
+| Buttons 37/38/39 | PASS (press and release on all three) |
+| Battery hold (GPIO2) after unplugging USB | PASS (19 min on battery, still advertising) |
+| Power-button hold time | **Not measured** (§6) |
+| Battery voltage factor | **Not calibrated** (no multimeter). 0xA1 reads 3.91 V while charging, which is plausible |
+| RTC sleep on USB (fallback path) | PASS |
+| RTC power-off on battery, 120 s | PASS: 20 arms, 19 wakes + 1 pending, 0 missed (§4) |
+| 600 s (1/60 Hz countdown) | PASS on USB: RTC timer fired (TF set) before the ESP32 timer |
+| 16000 s (minute/hour alarm) | Programming verified by register readback. The fire itself was not waited out (§4) |
+| Image push in a wake window | see §5 |
+| Off current | **Not measured** |
+| Boot screen not redrawn on battery RTC wakes | **Not observed visually.** The firmware path (`is_deep_sleep_wake`) is confirmed on USB |
+| All CI targets build | PASS (12 envs in `firmware-targets.json`, not 11) |
+
+## 1. IT8951 byte order (FastEPD bug) — fixed on PR 1
+
+**Symptom:** the 4bpp test image was readable and the right way up, but fine
+detail looked "interlaced / shifted horizontally".
+
+**Cause:** FastEPD 2.2.0 loads IT8951 frames with `IT8951_LDIMG_L_ENDIAN`
+unless the panel has `BB_PANEL_FLAG_MIRROR_X`. That swaps the two bytes of
+every 16-bit word, so 4bpp pixel pairs land 2 px off and 1bpp bytes land
+8 px off. M5Stack's M5EPD driver sends the same high-nibble-first bytes with
+`IT8951_LDIMG_B_ENDIAN`. The reTerminal ED103TC2 is MIRROR_X, so it already
+gets B_ENDIAN, and nobody had seen the bug. The old note in
+`fastepd_partial_refresh()` about "IT8951 region DU had persistent edge
+alignment issues" may be the same bug.
+
+**Fix (`f271dc5`):** for unmirrored IT8951 panels (only the M5Paper today),
+full refreshes go through `it8951_full_write_unmirrored()` in
+`src/display_fastepd.cpp`. It sends the same frame with the same GC16
+waveform, loaded B_ENDIAN. `it8951_fullscreen_du()` uses B_ENDIAN too.
+Mirrored panels keep FastEPD's own writer, unchanged.
+
+**Verified:** the 4bpp image is sharp after the fix (user confirmed).
+**Not verified:** 1bpp/mono and the DU path on screen. Worth reporting
+upstream to FastEPD.
+
+## 2. VCOM
+
+`bbepInitIT8951()` always writes VCOM −1.5 V. The `iVCOM` passed to
+`setPanelSize()` is not used on the IT8951 path, so the branch's `-1600` is a
+no-op. M5EPD uses −2.30 V for this panel. Gray steps 0 (black) to 15 (white)
+looked right at −1.5 V, so nothing was changed. A tested patch that writes
+−2.30 V after `initIT8951()` for panel 3005 is available if a side-by-side
+comparison favours it.
+
+## 3. Touch
+
+- **Mapping:** the GT911 reports portrait coordinates (540×960). With
+  flags 0 the firmware clamps y to 539. Corner taps logged with SWAP_XY only:
+  TL (63,483), TR (906,488), BR (903,46), BL (50,58), centre (479,271). So
+  x is correct and y is inverted, giving **flags = SWAP_XY | INVERT_Y = 0x06**,
+  the same as M5EPD's ROTATE_0. The opendisplay.org `m5-paper` preset is
+  updated (`a075d2c`).
+- **GPIO36 errors (fixed, `f271dc5`):** GT911 INT is GPIO36, an input-only pad
+  with no internal pull-up. `gt911_int_wake_before_irq()`, `attach_touch_int()`
+  and `gt911_hw_reset()` drove it as an output or set INPUT_PULLUP, which
+  logged `GPIO can only be used as input mode` and `gpio_pullup_en` errors on
+  every boot and every EPD refresh. These pads are now never driven and are
+  read as plain INPUT.
+- **I2C address varies:** because INT can't be driven, the GT911 comes up at
+  0x5D on some boots and 0x14 on others. Auto-detect handles it.
+
+## 4. RTC power-off (PR 2)
+
+**Schematic (A4-SYS_PWR):** FET1 (PMOS) switches VBAT. Its gate, `PWR_EN`,
+is pulled up to VBAT_IN and pulled low by FET2 (`PS_ON` = GPIO2), by
+`KEY_PUSH` (the rocker pushed in) through D10, and by `RTC_ALM` (PCF8563 INT)
+through D7. `KEY_PUSH_IO` (GPIO38) reads the key through D8 and appears to
+share the R34 pull-up node with `RTC_ALM`, so an asserted RTC INT probably
+also reads as "rocker pushed" until it is cleared.
+
+**USB fallback:** `Entering deep sleep for 120 seconds (config), RTC
+power-off`, then a timer wake (`Reset reason: DEEPSLEEP`). The boot screen is
+not redrawn, the 20 s window applies, and it re-arms. No `RTC: not reachable`
+or `arm failed` errors.
+
+**Battery, 120 s:** BLE presence alone was misleading, because the Windows
+scanner misses whole 20 s windows. A temporary NVS counter (not committed)
+recorded arms and wakes instead. Over about 46 min (16 min on USB, then
+30 min on battery): **arms = 20, wake boots = 19, plus 1 pending at replug**
+(`TC=82 T=5E`, 94 s left). No arm went without a wake. 18 of the 19 wake
+boots had TF set. The one without was a USB wake where the ESP32 timer beat
+the RTC by about 1 s (`T=01` seen at that boot).
+
+**600 s:** boot dump at the wake shows `TC=83 T=0A C2=05`: 1/60 Hz countdown
+from 10, TF set, TIE on.
+
+**16000 s:** armed at RTC 13:33:27. 267 min (rounded up) gives a target of
+18:00. Readback `AL=00 18 80 80`, `C2=02` (AIE), `TC=03` (timer off). Correct.
+It fires up to 59 s early because the alarm ignores seconds.
+
+**Leftover RTC state from M5Stack's factory firmware:** with the USB-only
+config (no sensor type 8), the board switched itself back on about 60–75 s
+after every reset-button power-off. A repeating RTC timer left armed by the
+factory firmware survives a flash erase, because the RTC is on VBAT_IN. The
+RTC config clears it at every boot. *Suggestion:* clear the PCF8563 interrupt
+flags and enables in `m5paper_init()` whatever the sensor config, so the
+USB-only preset doesn't get phantom power-ons.
+
+**VL flag:** the seconds register has VL (bit 7) set, meaning the RTC lost
+power at some point (probably long ago). The firmware doesn't use wall-clock
+time, so it's harmless.
+
+## 5. Image push in a wake window
+
+PASS on USB, pushed during a 20 s timer-wake window: `[EPD session]
+acquire: COLD bring-up` (the IT8951 re-inits after deep sleep), then
+`DW complete: 71 chunks, 259200/259200 bytes … 11.92 s` and `EPD refresh:
+FULL`, `refreshSuccess=1`. It was a full image transfer, as expected. Not
+repeated during a battery RTC-wake window, where the boot path differs only in
+how the wake is detected.
+
+## 6. Power-on, power-off and buttons
+
+- **Power button = rocker pushed in** (KEY_PUSH, GPIO38). M5Stack documents a
+  2 s hold. `m5paper_init()` drives GPIO2 at about 0.17 s after boot (about
+  0.3–0.5 s after power-on, counting the ROM and bootloader). The hold time was
+  not measured, because tests were confused by the leftover RTC timer and by
+  reset presses that didn't register.
+- **Reset button (back)** cuts power on battery (GPIO2 released), unless an
+  RTC interrupt is holding `PWR_EN`.
+- **`CMD_POWER_OFF` (0x0052)** NACKs on the MOSFET latch: only the D-FF latch
+  is implemented. The M5Paper could support it by driving GPIO2 low.
+  Follow-up.
+- **Deep-sleep button wake:** a classic ESP32 has ext0 only, so just GPIO37
+  (rocker up) is armed. The log warns `pin 37 has no internal pull`. 38 and 39
+  are timer-only. On battery with RTC power-off the ESP32 has no power at all,
+  so only the rocker push (hardware) or the RTC can switch it on. Rocker
+  up/down can't.
+- **Cold boot stays awake 120 s** before the first sleep
+  (`DEFAULT_MIN_WAKE_TIME_SECONDS`). This is by design. Timer wakes use the
+  20 s window.
+
+## 7. Battery voltage
+
+The schematic shows R83 3 kΩ / R86 11 kΩ (VBAT_S = 0.79 × VBAT). M5EPD
+assumes 2:1 (`SCALE_INV 2`). With factor 0xA1 the firmware reports 3.91 V
+while charging, which fits roughly 2:1, so this board may not match that
+schematic revision. Calibrate with a multimeter: new = 0xA1 × actual / reported.
+
+## Changes
+
+| Commit | Branch | What |
+|---|---|---|
+| `f271dc5` | Firmware `greg/awesome-dijkstra-5pq3ha` | IT8951 B_ENDIAN for unmirrored panels; never drive input-only touch INT |
+| `207ac66` | Firmware `-rtc` | merge of the above |
+| `a075d2c` | opendisplay.org `greg/awesome-dijkstra-5pq3ha` | `m5-paper` touch flags 0x6 |
+| `05de81b` | opendisplay.org `-rtc` | merge of the above |
+
+No changes to the RTC code were needed.
+
+## Open items
+
+- Mono (color_scheme 0) and the DU fast path on screen.
+- Battery voltage calibration (multimeter).
+- Off-current measurement.
+- Power-button hold time.
+- Watching the screen during battery RTC wakes for a boot-screen redraw.
+- The actual 16000 s alarm fire.
+- Follow-ups: 0x0052 on the MOSFET latch; clearing the RTC in `m5paper_init()`;
+  upstream FastEPD endian bug report.
