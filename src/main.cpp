@@ -1516,6 +1516,39 @@ void nm420_init(){
 // FastEPD as the panel's EN pin. Deep-sleep hold and power-off of GPIO2 go
 // through the MOSFET latch (DEVICE_FLAG_BATTERY_LATCH, pwr_pin_2 = 2), so the
 // preset sets both flags.
+//
+// The on-board BM8563 RTC (0x51 on I2C bus 0) runs from VBAT_IN, and its INT
+// line also pulls the power-switch gate low: an alarm or timer left armed (the
+// M5Stack factory firmware leaves a repeating timer) switches the board back
+// on after every power-off, and it survives a flash erase. m5paper_init()
+// therefore turns both interrupts off, clears the flags, stops the timer and
+// disables the alarm, whatever the sensor config says.
+#if defined(TARGET_ESP32) && defined(CONFIG_IDF_TARGET_ESP32)
+static bool m5paperRtcWrite(const uint8_t* regAndData, size_t len) {
+    Wire.beginTransmission(0x51);
+    Wire.write(regAndData, len);
+    return Wire.endTransmission() == 0;
+}
+
+static void m5paperRtcQuiesce() {
+    static const uint8_t kCtrl2[] = {0x01, 0x00};                    // AIE/TIE off, AF/TF cleared
+    static const uint8_t kTimer[] = {0x0E, 0x03};                    // timer off, 1/60 Hz
+    static const uint8_t kAlarm[] = {0x09, 0x80, 0x80, 0x80, 0x80};  // every alarm field disabled
+    if (!initOrRestoreWireForBus(0)) {
+        od_log_warn("M5Paper init: no I2C bus 0, RTC left as is");
+        return;
+    }
+    const bool ok = m5paperRtcWrite(kCtrl2, sizeof(kCtrl2)) &&
+                    m5paperRtcWrite(kTimer, sizeof(kTimer)) &&
+                    m5paperRtcWrite(kAlarm, sizeof(kAlarm));
+    if (ok) {
+        od_log_info("M5Paper init: RTC interrupts, timer and alarm cleared");
+    } else {
+        od_log_warn("M5Paper init: RTC not reachable at 0x51");
+    }
+}
+#endif
+
 void m5paper_init(){
 #if defined(TARGET_ESP32) && defined(CONFIG_IDF_TARGET_ESP32)
     static constexpr uint8_t kM5PaperOnPins[] = {2, 5};
@@ -1529,6 +1562,7 @@ void m5paper_init(){
         digitalWrite(pin, HIGH);
     }
     od_log_info("M5Paper init: main-power hold and EXT power HIGH");
+    m5paperRtcQuiesce();
 #endif
 }
 
