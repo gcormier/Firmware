@@ -431,13 +431,11 @@ void fastepd_direct_refresh(int refresh_mode) {
     if (!g_epd.currentBuffer()) return;
     if (refresh_mode == 1) {
         // FAST: parallel 1bpp uses native diff; IT8951 uses its DU waveform.
-        // 4bpp has no fast path (fastUpdate is 1bpp-only) -> fall back to full.
-        if (fastepd_is_parallel()) {
-            if (fastepd_panel_is_4gray()) fastepd_full_refresh_impl();
-            else g_epd.fastUpdate(true);
-        } else {
-            it8951_fullscreen_du();
-        }
+        // 4bpp has no fast path (fastUpdate and it8951_fullscreen_du() are
+        // 1bpp-only) -> fall back to full.
+        if (fastepd_panel_is_4gray()) fastepd_full_refresh_impl();
+        else if (fastepd_is_parallel()) g_epd.fastUpdate(true);
+        else it8951_fullscreen_du();
     } else {
         fastepd_full_refresh_impl();
     }
@@ -521,10 +519,11 @@ bool fastepd_partial_refresh(int refresh_mode) {
 
     if (refresh_mode == 0) {
         fastepd_full_refresh_impl();
-    } else if (fastepd_is_parallel()) {
+    } else if (fastepd_panel_is_4gray()) {
         // Rect already blitted into the framebuffer; 4bpp has no fast path.
-        if (fastepd_panel_is_4gray()) fastepd_full_refresh_impl();
-        else g_epd.fastUpdate(true);
+        fastepd_full_refresh_impl();
+    } else if (fastepd_is_parallel()) {
+        g_epd.fastUpdate(true);
     } else {
         // Region rect is still applied to the framebuffer via blit; refresh is
         // full-screen DU (IT8951 region DU had persistent edge alignment issues).
