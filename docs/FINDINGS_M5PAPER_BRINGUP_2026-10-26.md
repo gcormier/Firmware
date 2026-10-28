@@ -38,7 +38,7 @@ serial at INFO level, so they were read from the advertisements or from a
 | RTC sleep on USB (fallback path) | PASS |
 | RTC power-off on battery, 120 s | PASS: 20 arms, 19 wakes + 1 pending, 0 missed (§4) |
 | 600 s (1/60 Hz countdown) | PASS on USB: RTC timer fired (TF set) before the ESP32 timer |
-| 16000 s (minute/hour alarm) | PASS on USB: alarm flag set at the expected minute (§4) |
+| 16000 s (minute/hour alarm) | PASS on USB (alarm flag at the expected minute) and on battery (woke after 4 h 27 min) (§4) |
 | Image push in a wake window | see §5 |
 | Off current | **Not measured** |
 | Boot screen not redrawn on battery RTC wakes | PASS: a gray image survived about 1.5 h (about 38 wakes) on battery |
@@ -164,7 +164,11 @@ rail is already up, so nothing wakes the chip. That is expected. On battery the
 same INT switches the rail on. The ESP32 timer (16600 s nominal) expired after
 about 16260 s of RTC time, so the ESP32 slow clock ran about 2% fast. The wake
 cycle after that re-armed the 120 s countdown and fired normally (`C2=05`, TF).
-Not verified: the 16000 s wake on battery.
+**16000 s wake on battery** (80 MHz build `496255d`): a one-time 0x0053
+sleep of 16000 s was sent at 22:07:39. The device did not advertise again until
+02:34:10, 15991 s later. That is within the alarm's one-minute resolution.
+It then went back to the configured 120 s cycle (gaps of 141–146 s). The
+reported battery was 4.14–4.15 V, down from 4.15–4.17 V the evening before.
 
 **Leftover RTC state from M5Stack's factory firmware:** with the USB-only
 config (no sensor type 8), the board switched itself back on about 60–75 s
@@ -297,7 +301,8 @@ minimum). A longer sleep and a shorter window are the biggest saving.
 | `f4f73cc` | Firmware `-rtc` | merge of the above |
 | `54ea4fa` | Firmware `-rtc` | battery RTC wake and wake-window power results in this report |
 | `32a60fd`, `496255d` | Firmware PR 1, merged into `-rtc` | comment on re-enabling the Grove 5 V |
-| (this commit) | Firmware `-rtc` | 80 MHz battery wake results in this report |
+| `16689b2` | Firmware `-rtc` | 80 MHz battery wake results in this report |
+| (this commit) | Firmware `-rtc` | 16000 s battery wake result in this report |
 
 No changes to the RTC driver itself were needed.
 
@@ -308,7 +313,6 @@ No changes to the RTC driver itself were needed.
 - Off-current measurement.
 - A config option to turn the Grove 5 V back on (needs a protocol flag).
 - Wake-window current at 80 MHz vs 240 MHz (needs a meter).
-- The 16000 s alarm wake on battery (the fire is verified on USB).
 - FAST refresh in 4bpp on the ED103TC2 (reTerminal).
 - Follow-ups: update the 0x0052 `@targets`/`@errors` text in
   opendisplay-protocol (MOSFET latch now supported); upstream FastEPD endian
