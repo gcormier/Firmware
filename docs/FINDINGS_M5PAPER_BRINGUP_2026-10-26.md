@@ -42,7 +42,7 @@ serial at INFO level, so they were read from the advertisements or from a
 | Image push in a wake window | see §5 |
 | Off current | **Not measured** |
 | Boot screen not redrawn on battery RTC wakes | PASS: a gray image survived about 1.5 h (about 38 wakes) on battery |
-| Wake-window power | 80 MHz CPU, Grove 5 V off (§8). Saving not measured |
+| Wake-window power | 80 MHz CPU, Grove 5 V off (§8): 28 wakes and an upload on battery, PASS. Saving not measured |
 | All CI targets build | PASS (12 envs in `firmware-targets.json`, not 11) |
 
 ## 1. IT8951 byte order (FastEPD bug) — fixed on PR 1
@@ -255,7 +255,14 @@ the window. Two changes (`321f3be`, PR 1):
 
 Verified on USB with the RTC config: cold boot, RTC power-off sleep, timer
 wake at 80 MHz with the 20 s window, back to sleep. Not measured: the current
-saved (no meter). The battery wake test (§4) is still the 240 MHz build.
+saved (no meter).
+
+**On battery at 80 MHz** (`496255d`, Grove off, 120 s sleep, 20 s window):
+a 1bpp full upload in a wake window took 18 s and displayed correctly. A BLE
+watch from 20:56 to 22:06 saw 21 distinct windows. Every gap was one cycle
+(127–159 s) or two (272–303 s, the Windows scanner missing a window, as seen
+on USB). There were no longer gaps. That is 28 cycles in
+67 min. The reported battery stayed at 4.15–4.17 V throughout (ADC noise).
 Turning the Grove ports back on needs a config option, for example a new
 DeviceFlags bit, which is a protocol change upstream.
 
@@ -288,7 +295,9 @@ minimum). A longer sleep and a shorter window are the biggest saving.
 | `1a94f60`, `0cb3e8e` | Firmware `-rtc` | 0x0052 battery result, power-button hold time |
 | `321f3be` | Firmware `greg/awesome-dijkstra-5pq3ha` | M5Paper at 80 MHz, Grove 5 V boost off |
 | `f4f73cc` | Firmware `-rtc` | merge of the above |
-| (this commit) | Firmware `-rtc` | battery RTC wake and wake-window power results in this report |
+| `54ea4fa` | Firmware `-rtc` | battery RTC wake and wake-window power results in this report |
+| `32a60fd`, `496255d` | Firmware PR 1, merged into `-rtc` | comment on re-enabling the Grove 5 V |
+| (this commit) | Firmware `-rtc` | 80 MHz battery wake results in this report |
 
 No changes to the RTC driver itself were needed.
 
