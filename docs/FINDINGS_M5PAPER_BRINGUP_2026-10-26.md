@@ -41,7 +41,8 @@ serial at INFO level, so they were read from the advertisements or from a
 | 16000 s (minute/hour alarm) | PASS on USB: alarm flag set at the expected minute (§4) |
 | Image push in a wake window | see §5 |
 | Off current | **Not measured** |
-| Boot screen not redrawn on battery RTC wakes | **Not observed visually.** The firmware path (`is_deep_sleep_wake`) is confirmed on USB |
+| Boot screen not redrawn on battery RTC wakes | PASS: a gray image survived about 1.5 h (about 38 wakes) on battery |
+| Wake-window power | 80 MHz CPU, Grove 5 V off (§8). Saving not measured |
 | All CI targets build | PASS (12 envs in `firmware-targets.json`, not 11) |
 
 ## 1. IT8951 byte order (FastEPD bug) — fixed on PR 1
@@ -235,6 +236,36 @@ branches (`5479e3f`, merged as `4d6e092`). The board now reports 4.20 V. Not
 checked against a multimeter, or at a lower charge, where ADC non-linearity
 may add error.
 
+## 8. Power during the wake window
+
+Between wakes the RTC power-off cuts the whole board, so the 20 s advertising
+window is where the battery goes. The M5Paper build has no WiFi
+(`OPENDISPLAY_ENABLE_WIFI` is not set for `esp32-wrover-e-N4R8`) and no
+ESP-IDF power management (`CONFIG_PM_ENABLE` off), so the CPU polls through
+the window. Two changes (`321f3be`, PR 1):
+
+- **80 MHz CPU**, set in `m5paper_init()` right after the GPIO2 hold, so the
+  power-button hold time is unchanged (reset to hold 1068 ms vs 1073 ms).
+  A 259200-byte gray upload took 21.72 s on the device vs 21.76 s at 240 MHz
+  (BLE-bound), and its refresh 1.49 s vs 1.47 s. The cold-boot QR boot screen
+  now takes 8.2 s to render instead of 4.2 s. RTC wakes don't draw it.
+- **Grove 5 V boost off:** GPIO5 (EXT power) is now driven LOW. M5EPD turns it
+  on by default; nothing here uses the Grove ports. Touch still works
+  (a corner tap read x=18, y=51).
+
+Verified on USB with the RTC config: cold boot, RTC power-off sleep, timer
+wake at 80 MHz with the 20 s window, back to sleep. Not measured: the current
+saved (no meter). The battery wake test (§4) is still the 240 MHz build.
+Turning the Grove ports back on needs a config option, for example a new
+DeviceFlags bit, which is a protocol change upstream.
+
+**Wake-interval settings** (all config, no firmware change):
+`deep_sleep_time_seconds` (time asleep, up to about 18 h; the RTC picks the
+seconds countdown, the minutes countdown or the alarm), `sleep_timeout_ms` (the
+advertising window, 20 s in the preset), `min_wake_time_seconds` (the cold-boot
+hold, 120 s by default), and command 0x0053 (host override for one cycle, 60 s
+minimum). A longer sleep and a shorter window are the biggest saving.
+
 ## Changes
 
 | Commit | Branch | What |
@@ -253,7 +284,11 @@ may add error.
 | `d672a6b` | Firmware `-rtc` | readback, alarm-fire and battery results in this report |
 | `34548b0` | Firmware `greg/awesome-dijkstra-5pq3ha` | bit-reverse 1bpp rows for unmirrored IT8951 panels |
 | `314e411` | Firmware `-rtc` | merge of the above |
-| (this commit) | Firmware `-rtc` | 1bpp bit-order result in this report |
+| `35ec236` | Firmware `-rtc` | 1bpp bit-order result in this report |
+| `1a94f60`, `0cb3e8e` | Firmware `-rtc` | 0x0052 battery result, power-button hold time |
+| `321f3be` | Firmware `greg/awesome-dijkstra-5pq3ha` | M5Paper at 80 MHz, Grove 5 V boost off |
+| `f4f73cc` | Firmware `-rtc` | merge of the above |
+| (this commit) | Firmware `-rtc` | battery RTC wake and wake-window power results in this report |
 
 No changes to the RTC driver itself were needed.
 
@@ -262,7 +297,8 @@ No changes to the RTC driver itself were needed.
 - DU fast-refresh quality (ghosting, fill); a different fast waveform may do better.
 - Battery voltage against a multimeter, and at lower charge.
 - Off-current measurement.
-- Watching the screen during battery RTC wakes for a boot-screen redraw.
+- A config option to turn the Grove 5 V back on (needs a protocol flag).
+- Wake-window current at 80 MHz vs 240 MHz (needs a meter).
 - The 16000 s alarm wake on battery (the fire is verified on USB).
 - FAST refresh in 4bpp on the ED103TC2 (reTerminal).
 - Follow-ups: update the 0x0052 `@targets`/`@errors` text in
