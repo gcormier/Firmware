@@ -1551,17 +1551,23 @@ static void m5paperRtcQuiesce() {
 
 void m5paper_init(){
 #if defined(TARGET_ESP32) && defined(CONFIG_IDF_TARGET_ESP32)
-    static constexpr uint8_t kM5PaperOnPins[] = {2, 5};
-    for (uint8_t pin : kM5PaperOnPins) {
-        // Level before direction, then drop the sleep hold: the pad never
-        // glitches LOW on a wake from deep sleep.
-        gpio_set_level((gpio_num_t)pin, 1);
-        gpio_set_direction((gpio_num_t)pin, GPIO_MODE_OUTPUT);
-        gpio_hold_dis((gpio_num_t)pin);
-        pinMode(pin, OUTPUT);
-        digitalWrite(pin, HIGH);
-    }
-    od_log_info("M5Paper init: main-power hold and EXT power HIGH");
+    // GPIO2 holds main power. Level before direction, then drop the sleep
+    // hold: the pad never glitches LOW on a wake from deep sleep.
+    gpio_set_level(GPIO_NUM_2, 1);
+    gpio_set_direction(GPIO_NUM_2, GPIO_MODE_OUTPUT);
+    gpio_hold_dis(GPIO_NUM_2);
+    pinMode(2, OUTPUT);
+    digitalWrite(2, HIGH);
+    // GPIO5 enables the 5 V boost for the Grove ports, which nothing here
+    // uses; M5EPD turns it on by default. Keep it off to save power.
+    gpio_hold_dis(GPIO_NUM_5);
+    pinMode(5, OUTPUT);
+    digitalWrite(5, LOW);
+    // BLE needs no more than 80 MHz, and the wake window is mostly idle
+    // polling. Switched after the GPIO2 hold so the power-button hold time
+    // does not grow.
+    setCpuFrequencyMhz(80);
+    od_log_info("M5Paper init: main-power hold, EXT power off, CPU %u MHz", (unsigned)getCpuFrequencyMhz());
     m5paperRtcQuiesce();
 #endif
 }
