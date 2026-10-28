@@ -1583,8 +1583,11 @@ void m5paper_init(){
     gpio_hold_dis(GPIO_NUM_2);
     pinMode(2, OUTPUT);
     digitalWrite(2, HIGH);
-    // GPIO5 enables the 5 V boost for the Grove ports, which nothing here
-    // uses; M5EPD turns it on by default. Keep it off to save power.
+    // GPIO5 enables the 5 V boost for the Grove ports (A/B/C), which nothing
+    // here uses; M5EPD turns it on by default. Off by default to save power.
+    // Anything plugged into a Grove port is unpowered. To power it, drive
+    // GPIO5 HIGH here instead; no config option exists yet (it would need a
+    // new DeviceFlags bit in opendisplay-protocol).
     gpio_hold_dis(GPIO_NUM_5);
     pinMode(5, OUTPUT);
     digitalWrite(5, LOW);
