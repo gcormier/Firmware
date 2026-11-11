@@ -55,10 +55,14 @@ Example payloads (manufacturer data after the company id, slot 7):
 | 13 | Rocker pressed again while awake | no reboot; button byte dynamic[0] 0x00 -> 0x81 -> 0x21 (a button event), cause stays `power_on`. |
 | 14 | Brownout | **`brownout` (9)**, unprovoked: on a cold boot (on USB, 08:26) the brownout detector fired during display init; the next boot advertised `brownout`. |
 
-Oddity: the rocker power-on advertised reboot flag 0, where a cold boot
-starts at 1. Most likely a nearby client (not HA, the board is not in HA)
-connected at boot and cleared it; another client connected at the very first
-boot logged here. Not confirmable without serial (on battery).
+The rocker power-on advertised reboot flag 0, where a cold boot starts at 1.
+Explained: this board IS configured in the user's Home Assistant (released
+OpenDisplay integration, entry `ODxxxxxx`), which connects after a reboot
+(config resync, firmware-version read 0x0043 seen at the first logged boot)
+and that connection clears the flag. HA was running throughout these tests,
+so its connections are part of the observed behaviour (e.g. the reboot flag
+going 1 -> 0 in the USB runs). This is exactly the level-1 limitation noted
+below: the flag is a poor wake-cause signal once any client connects.
 
 ## Not verified
 
@@ -67,8 +71,9 @@ boot logged here. Not confirmable without serial (on battery).
 - **Button wake (`button`)**: the M5Paper config has no deep-sleep wake
   button.
 - `software`, `panic`, `watchdog`: not provoked.
-- Home Assistant integration on a live HA instance: not done; the board is
-  not added to HA, and HA runs the released integration.
+- The new HA entities on a live HA instance: not done. The board is in the
+  user's HA, but HA runs the released integration, not the
+  `feat/wake-cause` branch.
 
 ## Implications for the HA level-1 fallback
 
