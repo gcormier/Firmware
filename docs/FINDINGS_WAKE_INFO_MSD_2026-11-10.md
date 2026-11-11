@@ -94,7 +94,7 @@ clears the flag; it is a limitation of level 1, and one reason for level 2.
 
 ## Final state of the board
 
-After the battery tests the board is to be restored to official 2.27.1 and
-the original config (`C:\od\cfg\bath-backup-2271.yaml`), which needs USB.
-The restore procedure was run once already on 2026-11-11 (app flash + config
-write, readback identical) before the battery tests re-flashed the test build.
+Restored on 2026-11-11 after the battery tests (and an ADC A/B, see the
+`feat/esp32-adc-calibrated-battery` branch): official 2.27.1 app image
+(boot log: 2.27.1, SHA b21bd1f), original config
+(`C:\od\cfg\bath-backup-2271.yaml`, readback identical), stock advertisement.
