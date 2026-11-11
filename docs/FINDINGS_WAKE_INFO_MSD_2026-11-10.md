@@ -61,7 +61,15 @@ OpenDisplay integration, entry `ODxxxxxx`), which connects after a reboot
 (config resync, firmware-version read 0x0043 seen at the first logged boot)
 and that connection clears the flag. HA was running throughout these tests,
 so its connections are part of the observed behaviour (e.g. the reboot flag
-going 1 -> 0 in the USB runs). This is exactly the level-1 limitation noted
+going 1 -> 0 in the USB runs).
+
+Confirmed with HA stopped (09:03, on battery): a rocker power-on advertised
+`power_on`, until=120 counting down, and reboot flag 1 in every captured
+advertisement of the 120 s window (0 with reboot=0). The rocker hold also
+showed as a button event (dynamic[0] 0x00 -> 0x01), the press still being
+held when the buttons came up. A second `power_on` boot tail (until=17) was
+seen just before it at 09:03:48, i.e. the board had also powered on at about
+09:02:05, presumably from an earlier press; not investigated. This is exactly the level-1 limitation noted
 below: the flag is a poor wake-cause signal once any client connects.
 
 ## Not verified
