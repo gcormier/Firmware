@@ -46,17 +46,27 @@ Example payloads (manufacturer data after the company id, slot 7):
 0000000000000414080000a098d3  timer     until=20   sleep=120  (timer wake)
 ```
 
+## Battery tests (2026-11-11, same board, 120 s config, USB unplugged ~08:48)
+
+| # | Check | Result |
+|---|---|---|
+| 11 | RTC power-off wake on battery | **`rtc` (3)** on all 5 wakes 08:49:50 ... 08:56:55, every ~2 min 20 s (120 s sleep + 20 s window); reboot flag 0 (cleared by firmware on RTC wakes, as before). The wakes logged just before the unplug read `timer`. Battery read 4.10 V. |
+| 12 | Rocker held 2-3 s while powered off | **`power_on` (1)** cold boot at ~08:57:25 with the 120 s cold-boot countdown (until=88 at 08:57:57). |
+| 13 | Rocker pressed again while awake | no reboot; button byte dynamic[0] 0x00 -> 0x81 -> 0x21 (a button event), cause stays `power_on`. |
+| 14 | Brownout | **`brownout` (9)**, unprovoked: on a cold boot (on USB, 08:26) the brownout detector fired during display init; the next boot advertised `brownout`. |
+
+Oddity: the rocker power-on advertised reboot flag 0, where a cold boot
+starts at 1. Most likely a nearby client (not HA, the board is not in HA)
+connected at boot and cleared it; another client connected at the very first
+boot logged here. Not confirmable without serial (on battery).
+
 ## Not verified
 
-- **RTC power-off wake (`rtc`)**: needs the board on battery so the latch
-  release really cuts power. Not done (board on USB, user away). The cause
-  logic is `rtcConsumeWake() && !deep-sleep wake`; rtcConsumeWake() itself was
-  verified on the kitchen board in PR #176.
-- **Rocker power-on on battery (`power_on`)**: same reason. On this chip any
-  cold start without the RTC flag reads POWERON, as test 1 shows.
+- **EN/rear reset on battery**: on battery the rear button cuts power, so it
+  reduces to test 12 (rocker power-on).
 - **Button wake (`button`)**: the M5Paper config has no deep-sleep wake
   button.
-- `software`, `panic`, `watchdog`, `brownout`: not provoked.
+- `software`, `panic`, `watchdog`: not provoked.
 - Home Assistant integration on a live HA instance: not done; the board is
   not added to HA, and HA runs the released integration.
 
@@ -71,8 +81,7 @@ clears the flag; it is a limitation of level 1, and one reason for level 2.
 
 ## Final state of the board
 
-Left on the test firmware (`903ae56`, reports version 1.0.0 because it is a
-local build) with the original config plus `wake_info_msd_slot: 7`
-(`C:\od\cfg\bath-wake-900s.yaml`): 900 s sleep, 20 s window, block published.
-To go back to stock: flash the 2.27.1 app image and write
-`bath-backup-2271.yaml`.
+After the battery tests the board is to be restored to official 2.27.1 and
+the original config (`C:\od\cfgath-backup-2271.yaml`), which needs USB.
+The restore procedure was run once already on 2026-11-11 (app flash + config
+write, readback identical) before the battery tests re-flashed the test build.

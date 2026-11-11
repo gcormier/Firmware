@@ -104,7 +104,8 @@ costs one more dynamic byte.
   so the changing countdown never counts as activity.
 - Cost: one byte of RAM. While a countdown is running the MSD is rebuilt and
   re-advertised once a second (the ESP32 transport restarts advertising on
-  each change: one ~50 ms stop/start per second, plus a battery ADC read).
+  each change: one ~50 ms stop/start per second; the battery ADC read is
+  cached for 30 s, so it is not repeated every second).
   Nothing is refreshed when the slot is off or the device will not sleep.
 
 #### The 0x0053 override
