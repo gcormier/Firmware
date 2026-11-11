@@ -6,9 +6,9 @@ Hardware check of the provisional 3-byte MsdWakeInfo block
 
 ## Setup
 
-- Board: original M5Stack M5Paper, ESP32-D0WDQ6-V3, CH9102 USB-serial (COM20),
-  BLE `xx:xx:xx:xx:xx:xx`, name `ODxxxxxx` ("bathroom" board; the "kitchen"
-  M5Paper `xx:xx:xx:xx:xx:xx` was not available).
+- Board: original M5Stack M5Paper, ESP32-D0WDQ6-V3, CH9102 USB-serial
+  ("bathroom" board; the "kitchen" M5Paper, CP2104 USB-serial, was not
+  available).
 - Was running official 2.27.1 with the same config as the kitchen board
   (battery mode, PCF8563 RTC sensor type 8, MOSFET latch, 900 s sleep, 20 s
   window). Backed up first: `C:\od\cfg\bath-backup-2271.yaml`.
@@ -21,7 +21,7 @@ Hardware check of the provisional 3-byte MsdWakeInfo block
 - Tools: `C:\od\cfg\wakewatch.py` (active BLE scan, logs and decodes the
   block), `serlog.py` (serial without resetting), `sleepcmd.py` (0x0053),
   `holdconn.py` (hold a connection N s). Note: the Windows scanner only sees
-  `ODxxxxxx` with **active** scanning, and it drops reports for 10-50 s at a
+  the board with **active** scanning, and it drops reports for 10-50 s at a
   time, so not every advertisement is logged.
 
 ## Results
@@ -57,7 +57,7 @@ Example payloads (manufacturer data after the company id, slot 7):
 
 The rocker power-on advertised reboot flag 0, where a cold boot starts at 1.
 Explained: this board IS configured in the user's Home Assistant (released
-OpenDisplay integration, entry `ODxxxxxx`), which connects after a reboot
+OpenDisplay integration), which connects after a reboot
 (config resync, firmware-version read 0x0043 seen at the first logged boot)
 and that connection clears the flag. HA was running throughout these tests,
 so its connections are part of the observed behaviour (e.g. the reboot flag
