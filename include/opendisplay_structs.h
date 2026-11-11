@@ -97,6 +97,10 @@
  *       Together with OD_DEVICE_FLAG_PWR_LATCH, deep sleep arms the RTC and
  *       releases the latch; the RTC INT powers the board back on (M5Paper).
  *       Backward-compatible enum addition; publishes no MSD data.
+ *     - PowerOption.wake_info_msd_slot carved from reserved[0] (reserved now
+ *       [3]); new WakeCause enum + MsdWakeInfo byte layout. ONE-BASED slot so an
+ *       old config's 0 keeps it off. Backward-compatible (old peers ignore the
+ *       byte; old configs publish nothing). docs/PROPOSAL_WAKE_REASON_MSD.md.
  *     - Add each payload-layout change here as it lands. On the next version bump,
  *       move these under a new "MAJOR.MINOR (YYYY-MM-DD)" heading.
  *
@@ -541,7 +545,8 @@ struct PowerOption {
     uint8_t  charger_flags;            /**< @bits ChargerFlags @doc "charger polarity flags (bitfield)." */
     uint16_t min_wake_time_seconds;    /**< @endian le @unit s @doc "min awake window after first boot / button wake; 0 = default 120 s." */
     uint8_t  screen_timeout_seconds;   /**< @unit s @min 0 @max 30 @doc "EPD keep-alive: seconds the panel stays powered after a refresh before shutdown (values >30 clamped; 0 = power off immediately; forced 0 when an AXP2101 PMIC is present)." */
-    uint8_t  reserved[4];              /**< @reserved @doc "future use; must be 0." */
+    uint8_t  wake_info_msd_slot;       /**< @min 0 @max 11 @doc "publish the WakeInfo byte (boot/wake cause, see MsdWakeInfo) into MSD dynamic data. ONE-BASED so the former must-be-0 reserved byte keeps meaning off: 0 = not published, N (1-11) = dynamic[N-1]. Values > 11 are treated as 0." @default 0 */
+    uint8_t  reserved[3];              /**< @reserved @doc "future use; must be 0." */
 } __attribute__((packed));
 OD_STATIC_ASSERT(sizeof(struct PowerOption) == 30, "PowerOption wire size");
 
@@ -1275,6 +1280,32 @@ OD_STATIC_ASSERT(sizeof(struct AuthProof) == 32, "AuthProof wire size");
 #define OD_MSD_STATUS_RESERVED_3           (1u << 3) /* @deprecated @doc "legacy name for OD_MSD_STATUS_ENCRYPTION_ENABLED (same bit)" */
 #define OD_MSD_STATUS_MAIN_LOOP_COUNTER_SHIFT 4u     /* @doc "bits 4-7: free-running main-loop nibble counter (liveness)" */
 #define OD_MSD_STATUS_MAIN_LOOP_COUNTER_MASK  0xF0u  /* @doc "mask for the bits 4-7 main-loop counter nibble" */
+
+/** @enum WakeCause  @width 1
+ *  @doc "Why the device last booted or woke (low nibble of the MsdWakeInfo byte,
+ *  published at PowerOption.wake_info_msd_slot). Set once per boot and held
+ *  unchanged until the next boot/wake, so every advertisement of one wake window
+ *  carries the same value. Values 11-14 reserved; peers map unknown values to
+ *  OTHER." */
+enum WakeCause {
+    OD_WAKE_CAUSE_UNKNOWN   = 0,  /**< @doc "not determined (target does not report it)" */
+    OD_WAKE_CAUSE_POWER_ON  = 1,  /**< @doc "cold power-on (supply applied / power button / latch switched on). NOTE: the ESP32 family reports an EN-pin reset as power-on too." */
+    OD_WAKE_CAUSE_RESET_PIN = 2,  /**< @doc "external reset pin (only where the SoC tells it apart from power-on)" */
+    OD_WAKE_CAUSE_RTC       = 3,  /**< @doc "external RTC switched the board back on (power-off sleep, SensorType PCF8563)" */
+    OD_WAKE_CAUSE_TIMER     = 4,  /**< @doc "MCU deep-sleep timer wake" */
+    OD_WAKE_CAUSE_BUTTON    = 5,  /**< @doc "MCU deep-sleep wake from a button/GPIO (ext0/ext1/GPIO)" */
+    OD_WAKE_CAUSE_SOFTWARE  = 6,  /**< @doc "firmware-requested restart (config write, OTA, reboot command)" */
+    OD_WAKE_CAUSE_PANIC     = 7,  /**< @doc "crash / exception reset" */
+    OD_WAKE_CAUSE_WATCHDOG  = 8,  /**< @doc "any watchdog reset" */
+    OD_WAKE_CAUSE_BROWNOUT  = 9,  /**< @doc "supply brownout reset" */
+    OD_WAKE_CAUSE_USB_POWER = 10, /**< @doc "power-on with USB/external power present (reserved; not emitted yet)" */
+    OD_WAKE_CAUSE_OTHER     = 15  /**< @doc "any other reset or wake source" */
+};
+
+/* MsdWakeInfo byte (published at dynamic[PowerOption.wake_info_msd_slot - 1]).
+ * bits 0-3 WakeCause; bits 4-7 reserved, must be 0 (room for later wake-window
+ * flags, e.g. "sleep imminent"). See docs/PROPOSAL_WAKE_REASON_MSD.md. */
+#define OD_MSD_WAKE_INFO_CAUSE_MASK  0x0Fu /* @doc "bits 0-3: WakeCause" */
 
 /** @struct MsdAdvertisement  @message CMD_READ_MSD  @endian le
  *  @doc "16-byte OpenDisplay manufacturer-specific data. Broadcast in BLE

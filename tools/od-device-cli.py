@@ -279,7 +279,8 @@ BLOCKS: dict[int, Block] = {
             Field("charger_flags", "u8", 1),
             Field("min_wake_time_seconds", "u16", 2),
             Field("screen_timeout_seconds", "u8", 1),
-            Field("reserved", "hex", 4),
+            Field("wake_info_msd_slot", "u8", 1),  # 1-based dynamic index; 0 = off
+            Field("reserved", "hex", 3),
         ],
         30,
         1,

@@ -20,6 +20,7 @@
 #include "session_guard.h"
 #include "touch_input.h"
 #include "watchdog.h"
+#include "wake_cause.h"
 #include "uzlib.h"
 #if defined(TARGET_ESP32) && defined(OPENDISPLAY_FASTEPD)
 #include "display_fastepd.h"
@@ -1915,6 +1916,11 @@ void updatemsdata(){
         memset(m.dynamic, 0xFF, sizeof m.dynamic);
     } else {
         memcpy(m.dynamic, dynamicreturndata, sizeof m.dynamic);
+        // Overlaid on the copy, not written into dynamicreturndata: the wake
+        // byte never changes within a boot and must not look like activity to
+        // pollActivity()'s dynamicreturndata diff.
+        wakeCauseApplyToMsd(m.dynamic, sizeof m.dynamic,
+                            globalConfig.power_option.wake_info_msd_slot);
     }
     m.chip_temperature = temperatureByte;
     m.battery_voltage_low = batteryVoltageLowByte;

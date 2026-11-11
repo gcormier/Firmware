@@ -7,6 +7,7 @@
 #include "power_latch.h"
 #include "wake_button.h"
 #include "rtc_pcf8563.h"
+#include "wake_cause.h"
 #include "touch_input.h"
 #include "encryption.h"
 #include "ble_transport.h"
@@ -205,7 +206,9 @@ void setup() {
     // is configured: it also clears the flag that holds INT (and the rail) on.
     // RTC memory died with the rail, so displayed_etag is 0 (the host sends a
     // full image) and rebootFlag is cleared here -- this is not a reboot.
-    if (rtcConsumeWake() && !is_deep_sleep_wake) {
+    const bool rtcWake = rtcConsumeWake();
+    wakeCauseDetectEsp32((int)wakeup_reason, rtcWake && !is_deep_sleep_wake);
+    if (rtcWake && !is_deep_sleep_wake) {
         is_deep_sleep_wake = true;
         woke_from_deep_sleep = true;
         deep_sleep_count++;
