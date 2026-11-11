@@ -72,7 +72,29 @@ const char* wakeCauseName(uint8_t cause) {
     }
 }
 
-void wakeCauseApplyToMsd(uint8_t* dynamic, uint8_t len, uint8_t slot) {
-    if (slot == 0 || slot > len) return;
-    dynamic[slot - 1] = (uint8_t)(s_wakeCause & OD_MSD_WAKE_INFO_CAUSE_MASK);
+uint8_t wakeInfoSleepCode(uint32_t seconds) {
+    if (seconds == 0) return 0;
+    const uint32_t fineMax = OD_MSD_SLEEP_FINE_MAX_CODE * OD_MSD_SLEEP_FINE_STEP_S;
+    if (seconds <= fineMax) {
+        return (uint8_t)((seconds + OD_MSD_SLEEP_FINE_STEP_S - 1) / OD_MSD_SLEEP_FINE_STEP_S);
+    }
+    const uint32_t code = OD_MSD_SLEEP_FINE_MAX_CODE +
+        (seconds - fineMax + OD_MSD_SLEEP_COARSE_STEP_S - 1) / OD_MSD_SLEEP_COARSE_STEP_S;
+    return code > 0xFFu ? (uint8_t)0xFF : (uint8_t)code;
+}
+
+uint8_t wakeInfoSleepInByte(uint32_t msUntilSleep) {
+    if (msUntilSleep == UINT32_MAX) return OD_MSD_SLEEP_IN_NOT_SLEEPING;
+    const uint32_t s = (msUntilSleep + 999u) / 1000u;
+    return s >= OD_MSD_SLEEP_IN_MAX ? (uint8_t)OD_MSD_SLEEP_IN_MAX : (uint8_t)s;
+}
+
+void wakeInfoApplyToMsd(uint8_t* dynamic, uint8_t len, uint8_t slot,
+                        uint32_t msUntilSleep, uint32_t sleepSeconds) {
+    if (slot == 0 || (uint32_t)slot - 1u + OD_MSD_WAKE_INFO_LENGTH > len) return;
+    uint8_t* b = &dynamic[slot - 1];
+    b[0] = (uint8_t)(s_wakeCause & OD_MSD_WAKE_INFO_CAUSE_MASK);
+    b[1] = wakeInfoSleepInByte(msUntilSleep);
+    // Not sleeping: no planned duration either, whatever the config says.
+    b[2] = (msUntilSleep == UINT32_MAX) ? 0 : wakeInfoSleepCode(sleepSeconds);
 }

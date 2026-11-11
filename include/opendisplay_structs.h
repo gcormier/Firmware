@@ -98,9 +98,11 @@
  *       releases the latch; the RTC INT powers the board back on (M5Paper).
  *       Backward-compatible enum addition; publishes no MSD data.
  *     - PowerOption.wake_info_msd_slot carved from reserved[0] (reserved now
- *       [3]); new WakeCause enum + MsdWakeInfo byte layout. ONE-BASED slot so an
- *       old config's 0 keeps it off. Backward-compatible (old peers ignore the
- *       byte; old configs publish nothing). docs/PROPOSAL_WAKE_REASON_MSD.md.
+ *       [3]); new WakeCause enum + 3-byte MsdWakeInfo block (cause, seconds
+ *       until sleep, planned sleep code). ONE-BASED slot so an old config's 0
+ *       keeps it off. Backward-compatible (old peers ignore the bytes; old
+ *       configs publish nothing). PROVISIONAL pending opendisplay-protocol#15;
+ *       docs/PROPOSAL_WAKE_REASON_MSD.md.
  *     - Add each payload-layout change here as it lands. On the next version bump,
  *       move these under a new "MAJOR.MINOR (YYYY-MM-DD)" heading.
  *
@@ -545,7 +547,7 @@ struct PowerOption {
     uint8_t  charger_flags;            /**< @bits ChargerFlags @doc "charger polarity flags (bitfield)." */
     uint16_t min_wake_time_seconds;    /**< @endian le @unit s @doc "min awake window after first boot / button wake; 0 = default 120 s." */
     uint8_t  screen_timeout_seconds;   /**< @unit s @min 0 @max 30 @doc "EPD keep-alive: seconds the panel stays powered after a refresh before shutdown (values >30 clamped; 0 = power off immediately; forced 0 when an AXP2101 PMIC is present)." */
-    uint8_t  wake_info_msd_slot;       /**< @min 0 @max 11 @doc "publish the WakeInfo byte (boot/wake cause, see MsdWakeInfo) into MSD dynamic data. ONE-BASED so the former must-be-0 reserved byte keeps meaning off: 0 = not published, N (1-11) = dynamic[N-1]. Values > 11 are treated as 0." @default 0 */
+    uint8_t  wake_info_msd_slot;       /**< @min 0 @max 9 @doc "publish the 3-byte MsdWakeInfo block (wake cause, seconds until sleep, planned sleep) into MSD dynamic data. ONE-BASED so the former must-be-0 reserved byte keeps meaning off: 0 = not published, N (1-9) = block at dynamic[N-1..N+1]. Values > 9 are treated as 0." @default 0 */
     uint8_t  reserved[3];              /**< @reserved @doc "future use; must be 0." */
 } __attribute__((packed));
 OD_STATIC_ASSERT(sizeof(struct PowerOption) == 30, "PowerOption wire size");
@@ -1282,7 +1284,7 @@ OD_STATIC_ASSERT(sizeof(struct AuthProof) == 32, "AuthProof wire size");
 #define OD_MSD_STATUS_MAIN_LOOP_COUNTER_MASK  0xF0u  /* @doc "mask for the bits 4-7 main-loop counter nibble" */
 
 /** @enum WakeCause  @width 1
- *  @doc "Why the device last booted or woke (low nibble of the MsdWakeInfo byte,
+ *  @doc "Why the device last booted or woke (low nibble of MsdWakeInfo byte 0,
  *  published at PowerOption.wake_info_msd_slot). Set once per boot and held
  *  unchanged until the next boot/wake, so every advertisement of one wake window
  *  carries the same value. Values 11-14 reserved; peers map unknown values to
@@ -1302,10 +1304,25 @@ enum WakeCause {
     OD_WAKE_CAUSE_OTHER     = 15  /**< @doc "any other reset or wake source" */
 };
 
-/* MsdWakeInfo byte (published at dynamic[PowerOption.wake_info_msd_slot - 1]).
- * bits 0-3 WakeCause; bits 4-7 reserved, must be 0 (room for later wake-window
- * flags, e.g. "sleep imminent"). See docs/PROPOSAL_WAKE_REASON_MSD.md. */
-#define OD_MSD_WAKE_INFO_CAUSE_MASK  0x0Fu /* @doc "bits 0-3: WakeCause" */
+/* MsdWakeInfo block: 3 bytes at dynamic[PowerOption.wake_info_msd_slot - 1].
+ * PROVISIONAL encoding, under discussion in opendisplay-protocol#15; see
+ * docs/PROPOSAL_WAKE_REASON_MSD.md.
+ *   [0] bits 0-3 WakeCause; bits 4-7 reserved, must be 0.
+ *   [1] seconds until the device plans to sleep, counted from this
+ *       advertisement: 0-253 exact, 254 = 254 s or more, 0xFF = not going to
+ *       sleep (wired / deep sleep off) or unknown. Refreshed about once a second
+ *       while counting; resets when activity (a connection) extends the window.
+ *   [2] planned length of the coming sleep, OD_MSD_SLEEP_* code below. */
+#define OD_MSD_WAKE_INFO_LENGTH        3u     /* @doc "bytes in the MsdWakeInfo block" */
+#define OD_MSD_WAKE_INFO_CAUSE_MASK    0x0Fu  /* @doc "byte 0 bits 0-3: WakeCause" */
+#define OD_MSD_SLEEP_IN_NOT_SLEEPING   0xFFu  /* @doc "byte 1: not going to sleep / unknown" */
+#define OD_MSD_SLEEP_IN_MAX            0xFEu  /* @doc "byte 1: 254 s or more" */
+/* Byte 2 sleep-duration code: 0 = no timed sleep; 1-120 = code x 15 s (15 s to
+ * 30 min); 121-254 = 30 min + (code - 120) x 8 min (to ~18.4 h, covering the
+ * u16 deep_sleep_time_seconds); 255 = longer. Encoders round UP. */
+#define OD_MSD_SLEEP_FINE_STEP_S       15u    /* @doc "sleep code 1-120: 15 s steps" */
+#define OD_MSD_SLEEP_FINE_MAX_CODE     120u   /* @doc "last 15 s-step code (30 min)" */
+#define OD_MSD_SLEEP_COARSE_STEP_S     480u   /* @doc "sleep code 121-254: 8 min steps above 30 min" */
 
 /** @struct MsdAdvertisement  @message CMD_READ_MSD  @endian le
  *  @doc "16-byte OpenDisplay manufacturer-specific data. Broadcast in BLE

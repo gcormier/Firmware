@@ -1916,11 +1916,13 @@ void updatemsdata(){
         memset(m.dynamic, 0xFF, sizeof m.dynamic);
     } else {
         memcpy(m.dynamic, dynamicreturndata, sizeof m.dynamic);
-        // Overlaid on the copy, not written into dynamicreturndata: the wake
-        // byte never changes within a boot and must not look like activity to
-        // pollActivity()'s dynamicreturndata diff.
-        wakeCauseApplyToMsd(m.dynamic, sizeof m.dynamic,
-                            globalConfig.power_option.wake_info_msd_slot);
+        // Overlaid on the copy, not written into dynamicreturndata: the
+        // sleep countdown changes every second and must not look like
+        // activity to pollActivity()'s dynamicreturndata diff (it would hold
+        // the device awake forever).
+        wakeInfoApplyToMsd(m.dynamic, sizeof m.dynamic,
+                           globalConfig.power_option.wake_info_msd_slot,
+                           getMsUntilSleep(), getPlannedSleepSeconds());
     }
     m.chip_temperature = temperatureByte;
     m.battery_voltage_low = batteryVoltageLowByte;

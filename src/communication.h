@@ -10,6 +10,12 @@ uint8_t getFirmwareMajor();
 uint8_t getFirmwareMinor();
 uint8_t getFirmwarePatch();
 uint8_t getRebootFlag();  // 1 after reboot or a live config write, cleared to 0 on BLE connection
+// Milliseconds until the device's sleep policy puts it into deep sleep if
+// nothing else happens; UINT32_MAX when it will not sleep (wired, deep sleep
+// off, nRF). Pure read of main.cpp's sleep state (MsdWakeInfo, see wake_cause.h).
+uint32_t getMsUntilSleep();
+// Seconds the next deep sleep will last (config deep_sleep_time_seconds), 0 if none.
+uint32_t getPlannedSleepSeconds();
 const char* getFirmwareShaString();
 void handleFirmwareVersion();
 void handleReadMSD();

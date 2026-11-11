@@ -348,6 +348,62 @@ uint8_t getRebootFlag() {
     return rebootFlag;
 }
 
+uint32_t getPlannedSleepSeconds() {
+#ifdef TARGET_ESP32
+    if (globalConfig.power_option.power_mode == 1) {
+        return globalConfig.power_option.deep_sleep_time_seconds;
+    }
+#endif
+    return 0;
+}
+
+// Mirrors the two sleep decisions in loop(): the wake-window branch of
+// platformLoopPrologue() and platformIdle() both sleep once the quiet time since
+// lastActivityMs reaches sleep_timeout_ms (DEFAULT_IDLE_HOLD_MS if 0) and the
+// min-wake hold has run out. Any activity (a connection is activity on every
+// pass) restarts the count, which is exactly what the advertised countdown
+// should do. Reads only; never clears the hold flag itself.
+uint32_t getMsUntilSleep() {
+#ifdef TARGET_ESP32
+    if (globalConfig.power_option.power_mode != 1 ||
+        globalConfig.power_option.deep_sleep_time_seconds == 0) {
+        return UINT32_MAX;
+    }
+    const uint32_t now = millis();
+    uint32_t holdMs = globalConfig.power_option.sleep_timeout_ms;
+    if (holdMs == 0) holdMs = DEFAULT_IDLE_HOLD_MS;
+    const uint32_t idleMs = now - lastActivityMs;
+    uint32_t remaining = idleMs >= holdMs ? 0 : holdMs - idleMs;
+    if (minWakeWindowActive) {
+        const uint32_t elapsed = now - minWakeWindowStartMs;
+        const uint32_t minMs = minWakeTimeMs();
+        if (elapsed < minMs && minMs - elapsed > remaining) remaining = minMs - elapsed;
+    }
+    return remaining;
+#else
+    return UINT32_MAX;
+#endif
+}
+
+#ifdef TARGET_ESP32
+// Keep the advertised seconds-until-sleep current. updatemsdata() only pushes
+// to the radio when the 16-byte payload changed, so this costs one advertising
+// restart per second while a countdown is running and nothing otherwise (no
+// wake-info slot configured, or not going to sleep).
+static void serviceWakeInfoMsd() {
+    if (globalConfig.power_option.wake_info_msd_slot == 0) return;
+    static uint32_t lastRefreshMs = 0;
+    static uint8_t lastSleepIn = OD_MSD_SLEEP_IN_NOT_SLEEPING;
+    const uint32_t now = millis();
+    if (now - lastRefreshMs < 1000) return;
+    const uint8_t sleepIn = wakeInfoSleepInByte(getMsUntilSleep());
+    if (sleepIn == lastSleepIn) return;
+    lastRefreshMs = now;
+    lastSleepIn = sleepIn;
+    updatemsdata();
+}
+#endif
+
 // Deferred work, serviced by loop(). File-static on purpose: these encode
 // application policy, so nothing outside this file reads them, and the two that
 // other translation units need to RAISE do so through the request functions
@@ -870,6 +926,7 @@ static void serviceBleRx() {
 static bool platformLoopPrologue() {
 #ifdef TARGET_ESP32
     pollActivity();
+    serviceWakeInfoMsd();
     // THIS IS THE MAIN (FIRST) LOOP FOR A DEEP SLEEP ENABLED ESP32
     if (woke_from_deep_sleep && advertising_timeout_active) {
         // An ADMITTED client, not merely a physical link. ble.isConnected() is the
